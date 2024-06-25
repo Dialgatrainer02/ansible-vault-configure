@@ -1,0 +1,8 @@
+---
+# defaults file for vault_configure
+vault_root_token_dir_output: "{{ lookup('ansible.builtin.env', 'HOME') }}/servers/vault_keys/{{ group_names[0] }}/root"
+vault_unseal_keys_dir_output: "{{ lookup('ansible.builtin.env', 'HOME') }}/servers/vault_keys/{{ group_names[0] }}/unseal"
+vault_auto_unseal_key_dir_output: "{{ lookup('ansible.builtin.env', 'HOME') }}/servers/vault_keys/auto-unseal"
+vault_configure_transit: false
+vault_unseal: false
+vault_initialise: false

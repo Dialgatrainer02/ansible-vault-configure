@@ -1,0 +1,114 @@
+---
+# tasks file for vault_configure
+- name: initialise vault
+  block:
+    - name: Create unseal directories
+      ansible.builtin.file:
+        path: "{{ vault_unseal_keys_dir_output }}"
+        state: directory
+      delegate_to: localhost
+    - name: Create auto unseal directory
+      ansible.builtin.file:
+        path: "{{ vault_auto_unseal_key_dir_output }}"
+        state: directory
+      delegate_to: localhost
+    - name: Create root key directories
+      ansible.builtin.file:
+        path: "{{ vault_root_token_dir_output }}"
+        state: directory
+      delegate_to: localhost
+    - name: Initialise Vault operator
+      ansible.builtin.shell: vault operator init -format json
+      environment:
+        VAULT_ADDR: "http://127.0.0.1:8200"
+      register: vault_init_results
+    - name: Parse output of vault init
+      ansible.builtin.set_fact:
+        vault_init_parsed: "{{ vault_init_results.stdout | from_json }}"
+    - name: Write unseal keys to files
+      ansible.builtin.copy:
+        dest: "{{ vault_unseal_keys_dir_output }}/unseal_key_{{ item.0 }}"
+        content: "{{ item.1 }}"
+      with_indexed_items: "{{ vault_init_parsed.unseal_keys_hex }}"
+      delegate_to: localhost
+    - name: Write root token to file
+      ansible.builtin.copy:
+        content: "{{ vault_init_parsed.root_token }}"
+        dest: "{{vault_root_token_dir_output}}/rootkey"
+      delegate_to: localhost
+  when: vault_initialise == true
+  ignore_errors: true
+- name: unseal vault
+  block:
+    - name: Reading unseal key contents
+      ansible.builtin.command: cat {{item}}
+      register: unseal_keys
+      with_fileglob: "{{ vault_unseal_keys_dir_output }}/*"
+      delegate_to: localhost
+      become: no
+    - name: Unseal vault with unseal keys
+      ansible.builtin.shell: |
+        vault operator unseal {{ item.stdout }}
+      environment:
+        VAULT_ADDR: "http://127.0.0.1:8200"
+      with_items: "{{ unseal_keys.results }}"
+  when: vault_unseal == true
+- name: get root token
+  ansible.builtin.command:
+    cmd: cat {{ vault_root_token_dir_output }}/rootkey
+  register: vault_root_token
+  delegate_to: localhost
+- name: wait for vault to clsuter
+  ansible.builtin.pause:
+    seconds: 8
+- name: login to vault
+  ansible.builtin.command:
+    cmd: vault login {{ vault_root_token.stdout }}
+  environment:
+    VAULT_ADDR: "http://127.0.0.1:8200"
+- name: configure autounseal transit
+  block:
+    - name: copy payload 
+      ansible.builtin.copy:
+        src: transit-policy.json
+        dest: /tmp/payload-policy.json
+    - name: enable and configure transit
+      ansible.builtin.shell: |
+        vault secret enable transit
+        vault audit enable file file_path=stdout
+        vault write -f transit/keys/autounseal
+        curl --header "X-Vault-Token: $VAULT_TOKEN" --request PUT --data @/tmp/payload-policy.json $VAULT_ADDR/v1/sys/policies/acl/autounseal
+      environment:
+        VAULT_ADDR: "http://127.0.0.1:8200"
+    - name: get wrapping key
+      ansible.builtin.command:
+        cmd: vault token create -orphan -policy="autounseal" -wrap-ttl=120 -period=24h -field=wrapping_token 
+      environment:
+        VAULT_ADDR: "http://127.0.0.1:8200"
+      register: wrapped_key
+    - name: unwrap key 
+      ansible.builtin.command:
+        cmd: vault unwrap -field=token "{{ wrapped_key.stdout }}"
+      environment:
+        VAULT_ADDR: "http://127.0.0.1:8200"
+      register: unseal_key
+    - name: write unseal key to file
+      ansible.builtin.copy:
+        content: "{{ unseal_key.stdout }}"
+        dest: "{{ vault_auto_unseal_key_dir_output }}/unseal_key"
+      delegate_to: localhost
+  when: vault_configure_transit == true
+- name: configure ssh certificates
+  block:
+    - name: copy payload 
+      ansible.builtin.copy:
+        src: ssh-role.json
+        dest: /tmp/payload-role.json
+    - name: enable and configure ssh
+      ansible.builtin.shell: |
+        vault secrets enable -path=ssh-client-signer ssh
+        vault write ssh-client-signer/config/ca generate_signing_key=true
+        curl -X PUT -H "X-Vault-Request: true" -H "X-Vault-Token: {{ vault_root_token.stdout }}" -d @/tmp/payload-role.json $VAULT_ADDR/v1/ssh-client-signer/roles/my-role
+      environment:
+        VAULT_ADDR: "http://127.0.0.1:8200"
+  when: vault_configure_ssh_certs == true
