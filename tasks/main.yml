@@ -75,7 +75,6 @@
     - name: enable and configure transit
       ansible.builtin.shell: |
         vault secret enable transit
-        vault audit enable file file_path=stdout
         vault write -f transit/keys/autounseal
         curl --header "X-Vault-Token: $VAULT_TOKEN" --request PUT --data @/tmp/payload-policy.json $VAULT_ADDR/v1/sys/policies/acl/autounseal
       environment:
