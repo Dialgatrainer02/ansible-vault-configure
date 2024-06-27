@@ -7,3 +7,4 @@ vault_configure_transit: false
 vault_configure_ssh_certs: false
 vault_unseal: false
 vault_initialise: false
+vault_pause_duration: 5
