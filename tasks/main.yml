@@ -60,7 +60,7 @@
   delegate_to: localhost
 - name: wait for vault to clsuter
   ansible.builtin.pause:
-    seconds: 8
+    seconds: "{{ vault_pause_duration }}"
 - name: login to vault
   ansible.builtin.command:
     cmd: vault login {{ vault_root_token.stdout }}
@@ -74,9 +74,9 @@
         dest: /tmp/payload-policy.json
     - name: enable and configure transit
       ansible.builtin.shell: |
-        vault secret enable transit
+        vault secrets enable transit
         vault write -f transit/keys/autounseal
-        curl --header "X-Vault-Token: $VAULT_TOKEN" --request PUT --data @/tmp/payload-policy.json $VAULT_ADDR/v1/sys/policies/acl/autounseal
+        curl --header "X-Vault-Token: {{ vault_root_token.stdout }}" --request PUT --data @/tmp/payload-policy.json $VAULT_ADDR/v1/sys/policies/acl/autounseal
       environment:
         VAULT_ADDR: "http://127.0.0.1:8200"
     - name: get wrapping key
@@ -101,7 +101,7 @@
   block:
     - name: copy payload 
       ansible.builtin.copy:
-        src: ssh-role.json
+        src: ssh_role.json
         dest: /tmp/payload-role.json
     - name: enable and configure ssh
       ansible.builtin.shell: |
